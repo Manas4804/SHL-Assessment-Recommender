@@ -1,14 +1,14 @@
+from dotenv import load_dotenv
+load_dotenv()  # must run before any app submodule is imported (they read env at import time)
+
 from contextlib import asynccontextmanager
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from .agent import process_chat
 from .models import ChatRequest, ChatResponse
 from .retriever import build_index
-
-load_dotenv()
 
 
 @asynccontextmanager

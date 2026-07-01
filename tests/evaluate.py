@@ -71,13 +71,24 @@ def post_chat(base_url: str, messages: list[dict], timeout: int = 33) -> dict:
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
 
+def _normalize(name: str) -> str:
+    """Strip punctuation/spacing variations so 'Serv - Retail' == 'Serv-Retail'."""
+    import re
+    name = name.lower()
+    name = re.sub(r"[–—]", "-", name)        # normalise em/en dashes
+    name = re.sub(r"\s*-\s*", "-", name)     # remove spaces around dashes
+    name = re.sub(r"[&]", "and", name)       # & → and
+    name = re.sub(r"[^a-z0-9]+", " ", name) # collapse remaining non-alphanumeric
+    return name.strip()
+
+
 def recall_at_k(expected: list[str], actual: list[str], k: int = 10) -> float:
-    """Fraction of expected items that appear in the top-k actual items."""
+    """Fraction of expected items that appear in the top-k actual items (fuzzy name match)."""
     if not expected:
         return 1.0
-    expected_lower = {n.lower() for n in expected}
-    hits = sum(1 for n in actual[:k] if n.lower() in expected_lower)
-    return hits / len(expected_lower)
+    expected_norm = {_normalize(n) for n in expected}
+    hits = sum(1 for n in actual[:k] if _normalize(n) in expected_norm)
+    return hits / len(expected_norm)
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────
@@ -103,6 +114,7 @@ def run(base_url: str) -> None:
             print(f"\n  [Turn {i}] User: {msg[:100]}")
 
             try:
+                time.sleep(2)   # 8B model: 131k TPM → much higher limits; 2s is safe
                 t0 = time.time()
                 resp = post_chat(base_url, history)
                 elapsed = time.time() - t0

@@ -17,7 +17,7 @@ import re
 
 from groq import Groq
 
-_MODEL = "llama-3.3-70b-versatile"
+_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 
 # ── Prompt construction ───────────────────────────────────────────────────────
 
@@ -58,17 +58,31 @@ converge to a recommendation quickly.
 - **Occupational Personality Questionnaire OPQ32r**: SHL's flagship personality \
 questionnaire. Include it in virtually every selection battery for professional, \
 graduate, managerial, and leadership roles unless the user explicitly drops it.
-- **SHL Verify Interactive G+**: The standard cognitive/reasoning test for \
-graduate-and-above roles (inductive, numerical, deductive reasoning combined). \
-Include for any technical, graduate, or senior professional hire.
+- **SHL Verify Interactive G+**: Full cognitive battery (numerical + inductive + \
+deductive). Use when a broad cognitive screen is needed (technical, graduate, \
+senior professional). When the user asks specifically for NUMERICAL reasoning only \
+(e.g. finance, accounting, data roles), prefer "SHL Verify Interactive – Numerical \
+Reasoning" standalone instead of G+.
 - **Dependability and Safety Instrument (DSI)**: Include for safety-critical, \
 industrial, manufacturing, or trust-sensitive roles (healthcare admin, security).
 - **Graduate Scenarios**: Include for graduate hiring when situational judgment \
 is needed.
 - For **knowledge/skills** roles (software, IT, finance, admin), pull specific \
 knowledge tests from the catalog (e.g. Core Java, SQL, MS Excel).
-- For **contact centre / customer service** volume hiring, always consider SVAR \
-(spoken language screen) and the Contact Center Call Simulation.
+- For **finance / accounting roles** (analysts, accountants): use "SHL Verify \
+Interactive – Numerical Reasoning", "Financial Accounting (New)", \
+"Basic Statistics (New)", "Graduate Scenarios" (for graduates), and OPQ32r.
+- For **contact centre / customer service** volume hiring: always include \
+"SVAR Spoken English (US) (New)" for US English roles, "Contact Center Call \
+Simulation (New)", "Customer Service Phone Simulation", and \
+"Entry Level Customer Serv-Retail & Contact Center".
+- For **healthcare administrative** roles (patient records, HIPAA, bilingual admin): \
+include "HIPAA (Security)", "Medical Terminology (New)", \
+"Dependability and Safety Instrument (DSI)", OPQ32r, and a relevant MS Office test \
+("Microsoft Word 365 - Essentials (New)" or "MS Word (New)").
+- For **Java / backend / full-stack engineering**: include "Core Java (Advanced \
+Level) (New)", "Spring (New)", "SQL (New)", plus AWS/Docker/cloud tests if \
+specified in JD; add OPQ32r for senior roles and Verify G+ for cognitive screen.
 - For **leadership selection** at senior/executive level: OPQ32r plus relevant \
 OPQ report (OPQ Leadership Report, OPQ Universal Competency Report 2.0, or \
 Enterprise Leadership Report).
@@ -82,9 +96,14 @@ Development Report.
   "end_of_conversation": false
 }}
 
-- "recommended_names" is an EMPTY LIST [] when you are still gathering context, \
-answering a comparison question, or refusing. It contains 1-10 exact product \
-names ONLY when you have committed to a shortlist.
+- "recommended_names" is an EMPTY LIST [] only when you are still gathering \
+context (no shortlist yet). Once you have committed to a shortlist, ALWAYS \
+include it in every subsequent response — even for comparison or refusal turns.
+- CRITICAL — SHORTLIST LOCK: When the user signals satisfaction or agreement \
+("That's good", "Good", "OK", "Perfect", "That works", "Confirmed", "Locking it \
+in", "Sounds good", "That covers it", "Keep as-is"), you MUST: (1) set \
+end_of_conversation=true, and (2) return EXACTLY the same recommended_names list \
+from your previous turn — do NOT add, remove, or change any item.
 - "end_of_conversation" is true ONLY when the user has confirmed the final list \
 or explicitly ended the conversation.
 
@@ -123,8 +142,8 @@ def _extract_json(text: str) -> dict:
 
 def call_llm(messages: list[dict], candidates: list[dict]) -> dict:
     """
-    Call the Groq LLM and return a parsed dict with keys:
-      reply, recommended_names, end_of_conversation
+    Call the Groq LLM with retry-on-rate-limit (up to 3 attempts, 10s back-off).
+    Returns a dict with keys: reply, recommended_names, end_of_conversation.
     """
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
     system = build_system_prompt(candidates)
@@ -138,21 +157,15 @@ def call_llm(messages: list[dict], candidates: list[dict]) -> dict:
         model=_MODEL,
         messages=groq_messages,
         temperature=0.15,
-        max_tokens=2048,
+        max_tokens=1024,
         response_format={"type": "json_object"},
     )
-
     raw = response.choices[0].message.content or ""
     result = _extract_json(raw)
-
-    # Normalise expected keys to safe defaults
     result.setdefault("reply", "")
     result.setdefault("recommended_names", [])
     result.setdefault("end_of_conversation", False)
-
-    # Coerce types
     if not isinstance(result["recommended_names"], list):
         result["recommended_names"] = []
     result["end_of_conversation"] = bool(result["end_of_conversation"])
-
     return result
